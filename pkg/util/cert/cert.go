@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	certDir        = "/tmp/k8s-webhook-server/serving-certs"
+	defaultCertDir = "/tmp/k8s-webhook-server/serving-certs"
 	vwcName        = "kueue-validating-webhook-configuration"
 	mwcName        = "kueue-mutating-webhook-configuration"
 	caName         = "kueue-ca"
@@ -43,6 +43,12 @@ const (
 func ManageCerts(mgr ctrl.Manager, cfg config.Configuration, setupFinished chan struct{}) error {
 	// DNSName is <service name>.<namespace>.svc
 	var dnsName = fmt.Sprintf("%s.%s.svc", *cfg.InternalCertManagement.WebhookServiceName, *cfg.Namespace)
+
+	// Use the CertDir provided by the webhook configuration, defaulting to "/tmp/k8s-webhook-server/serving-certs".
+	certDir := cfg.ControllerManager.Webhook.CertDir
+	if certDir == "" {
+		certDir = defaultCertDir
+	}
 
 	return cert.AddRotator(mgr, &cert.CertRotator{
 		SecretKey: types.NamespacedName{
