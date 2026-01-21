@@ -1089,6 +1089,11 @@ func EquivalentToWorkload(ctx context.Context, c client.Client, job GenericJob, 
 		return false, nil
 	}
 
+	// Check workload scheduling constraint (if any).
+	if job.Object().GetAnnotations()[kueue.WorkloadSchedulingModeConstraintKey] != wl.Annotations[kueue.WorkloadSchedulingModeConstraintKey] {
+		return false, nil
+	}
+
 	defaultDuration := int32(-1)
 	if ptr.Deref(wl.Spec.MaximumExecutionTimeSeconds, defaultDuration) != ptr.Deref(MaximumExecutionTimeSeconds(job), defaultDuration) {
 		return false, nil
@@ -1124,6 +1129,7 @@ func (r *JobReconciler) updateWorkloadToMatchJob(ctx context.Context, job Generi
 		return nil, fmt.Errorf("can't construct workload for update: %w", err)
 	}
 	wl.Spec = newWl.Spec
+	metav1.SetMetaDataAnnotation(&wl.ObjectMeta, kueue.WorkloadSchedulingModeConstraintKey, newWl.Annotations[kueue.WorkloadSchedulingModeConstraintKey])
 	if err = r.client.Update(ctx, wl); err != nil {
 		return nil, fmt.Errorf("updating existed workload: %w", err)
 	}
@@ -1283,6 +1289,8 @@ func ConstructWorkload(ctx context.Context, c client.Client, job GenericJob, lab
 	if err := ctrl.SetControllerReference(object, wl, c.Scheme()); err != nil {
 		return nil, err
 	}
+
+	metav1.SetMetaDataAnnotation(&wl.ObjectMeta, kueue.WorkloadSchedulingModeConstraintKey, job.Object().GetAnnotations()[kueue.WorkloadSchedulingModeConstraintKey])
 
 	return wl, nil
 }
@@ -1444,6 +1452,7 @@ func (r *JobReconciler) handleJobWithNoWorkload(ctx context.Context, job Generic
 	if err != nil {
 		return err
 	}
+
 	if err = r.client.Create(ctx, wl); err != nil {
 		return err
 	}

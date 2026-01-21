@@ -312,6 +312,8 @@ const (
 	// Fit means that there is enough unused quota to assign to this Flavor
 	// without preeemption, potentially with borrowing.
 	Fit
+
+	UnsatisfiedConstraint
 )
 
 func (m FlavorAssignmentMode) String() string {
@@ -483,6 +485,13 @@ type FlavorAssigner struct {
 	// In these scenarios, flavor assignment proceeds as in the original flow—i.e., as for regular,
 	// non-sliced workloads.
 	replaceWorkloadSlice *workload.Info
+
+	admissionConstraint *admissionConstraint
+}
+
+type admissionConstraint struct {
+	allowPreemption bool
+	allowBorrowing  bool
 }
 
 func New(wl *workload.Info, cq *schdcache.ClusterQueueSnapshot, resourceFlavors map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor, enableFairSharing bool, oracle preemptionOracle, preemptWorkloadSlice *workload.Info) *FlavorAssigner {
@@ -493,6 +502,30 @@ func New(wl *workload.Info, cq *schdcache.ClusterQueueSnapshot, resourceFlavors 
 		enableFairSharing:    enableFairSharing,
 		oracle:               oracle,
 		replaceWorkloadSlice: preemptWorkloadSlice,
+		admissionConstraint:  admissionConstraintFromAnnotations(wl.Obj.Annotations),
+	}
+}
+
+func admissionConstraintFromAnnotations(annotations map[string]string) *admissionConstraint {
+	constraint, found := annotations[kueue.WorkloadSchedulingModeConstraintKey]
+	if !found {
+		return nil
+	}
+	tokens := strings.Split(constraint, ".")
+	if len(tokens) != 2 {
+		return nil
+	}
+	preemption, err := strconv.ParseBool(tokens[0])
+	if err != nil {
+		return nil
+	}
+	borrowing, err := strconv.ParseBool(tokens[1])
+	if err != nil {
+		return nil
+	}
+	return &admissionConstraint{
+		allowPreemption: preemption,
+		allowBorrowing:  borrowing,
 	}
 }
 
@@ -785,6 +818,18 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 			}
 			maxBorrow = max(maxBorrow, borrow)
 			mode := granularMode{preemptionMode, borrowingLevel(borrow)}
+
+			if constraint := a.admissionConstraint; constraint != nil {
+				if (!constraint.allowPreemption && preemptionMode != fit) ||
+					(!constraint.allowBorrowing && mode.borrowingLevel > 0) {
+					reason := fmt.Sprintf("unsatisfied mode constraint Allow(Preempt,Borrow)=(%v,%v),"+
+						" mode=%s, borrowing=%d", constraint.allowPreemption, constraint.allowBorrowing,
+						preemptionMode.flavorAssignmentMode(), mode.borrowingLevel)
+					flavorQuotaReasons = append(flavorQuotaReasons, reason)
+					status.reasons = append(status.reasons, reason)
+					representativeMode.preemptionMode = noFit
+				}
+			}
 			if isPreferred(representativeMode, mode, a.cq.FlavorFungibility) {
 				representativeMode = mode
 			}
@@ -835,6 +880,11 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 			return bestAssignment, nil, consideredFlavors
 		}
 	}
+
+	for k, v := range bestAssignment {
+		log.Info("Best", "key", k, "value", v)
+	}
+	log.Info("Status", "reasons", status.reasons)
 	return bestAssignment, status, consideredFlavors
 }
 

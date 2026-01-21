@@ -75,6 +75,9 @@ type WorkloadSpec struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	MaximumExecutionTimeSeconds *int32 `json:"maximumExecutionTimeSeconds,omitempty"`
+
+	// AdmissionConstraints defines constraints for workload admission, including preemption and borrowing permissions.
+	AdmissionConstraints *AdmissionConstraints `json:"admissionConstraints,omitempty"`
 }
 
 // PriorityClassGroup indicates the API group of the PriorityClass object.
@@ -993,6 +996,13 @@ const (
 	// WorkloadFinishedReasonOutOfSync indicates that the prebuilt workload is not in sync with its parent job.
 	WorkloadFinishedReasonOutOfSync = "OutOfSync"
 )
+
+const WorkloadSchedulingModeConstraintKey = "admissionConstraint"
+
+type AdmissionConstraints struct {
+	AllowPreemption *bool `json:"allowPreemption,omitempty"`
+	AllowBorrowing  *bool `json:"allowBorrowing,omitempty"`
+}
 
 // +genclient
 // +kubebuilder:object:root=true
